@@ -111,7 +111,7 @@ ${text}`
 
 // Serve React app for all other routes
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'getstarted.html'));
+  res.sendFile(path.join(__dirname, 'getstarted.html'));
 });
 
 const PORT = 3000;
