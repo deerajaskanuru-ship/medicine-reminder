@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medicare Reminder – Dashboard</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body style="margin:0">
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const store = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+async function extractPrescription(base64, mediaType) {
+  const formData = new FormData();
+  const byteChars = atob(base64);
+  const byteArr = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArr], { type: mediaType });
+  formData.append("image", blob, "prescription.jpg");
+  const ocrResp = await fetch("/api/ocr", { method: "POST", body: formData });
+  const ocrText = await ocrResp.text();
+  let ocrData;
+  try { ocrData = JSON.parse(ocrText); } catch (e) { throw new Error("Server error during OCR: " + ocrText.slice(0, 200)); }
+  if (!ocrData.success) throw new Error("OCR failed: " + (ocrData.error || "Unknown error"));
+  const rawText = ocrData.text;
+  const parseResp = await fetch("/api/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: rawText }) });
+  const parseText = await parseResp.text();
+  let parseData;
+  try { parseData = JSON.parse(parseText); } catch (e) { throw new Error("Server error during parse: " + parseText.slice(0, 200)); }
+  if (!parseData.success) throw new Error("Parse failed: " + (parseData.error || "Unknown error"));
+  return { rawText, parsed: parseData.data };
+}
+
+async function parseTextOnly(rawText) {
+  const resp = await fetch("/api/parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: rawText }) });
+  const txt = await resp.text();
+  let data;
+  try { data = JSON.parse(txt); } catch (e) { throw new Error("Server error: " + txt.slice(0, 200)); }
+  if (!data.success) throw new Error(data.error || "Parse failed");
+  return data.data;
+}
+
+function requestNotifPerm() { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); }
+function sendNotif(title, body) { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body, icon: "💊" }); }
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --teal: #1a8a72; --teal-light: #e8f5f1; --teal-mid: #2fb89a;
+  --bg: #f4f7f5; --white: #ffffff; --text: #1c2b26; --muted: #7a9990;
+  --border: #d6e8e2; --red: #e05c5c; --amber: #e89820; --green: #2aab6e;
+  --card-shadow: 0 2px 12px rgba(26,138,114,0.08);
+}
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+.app { min-height: 100vh; display: flex; }
+.sidebar { width: 200px; min-height: 100vh; background: var(--white); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 0; flex-shrink: 0; }
+.sidebar-logo { padding: 20px 18px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.logo-badge { width: 36px; height: 36px; background: var(--teal); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.logo-text { font-weight: 600; font-size: 14px; line-height: 1.2; }
+.logo-sub { font-size: 11px; color: var(--muted); font-weight: 400; }
+.sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--muted); transition: all .15s; border: none; background: none; width: 100%; text-align: left; }
+.nav-item:hover { background: var(--teal-light); color: var(--teal); }
+.nav-item.active { background: var(--teal-light); color: var(--teal); }
+.nav-icon { font-size: 16px; }
+.sidebar-user { padding: 14px 12px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 9px; }
+.user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--teal); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+.user-name { font-size: 12px; font-weight: 600; line-height: 1.3; }
+.user-phone { font-size: 11px; color: var(--muted); }
+.logout-btn { margin-left: auto; font-size: 11px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 3px 6px; border-radius: 6px; }
+.logout-btn:hover { color: var(--red); background: #fef2f2; }
+.main { flex: 1; overflow-y: auto; }
+.page { padding: 28px 32px; max-width: 1100px; }
+.page-title { font-family: 'DM Serif Display', serif; font-size: 26px; margin-bottom: 4px; }
+.page-sub { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
+.card { background: var(--white); border-radius: 16px; border: 1px solid var(--border); padding: 22px; box-shadow: var(--card-shadow); }
+.card-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.welcome-hero { background: linear-gradient(135deg, var(--teal) 0%, #0f6b56 100%); border-radius: 20px; padding: 32px; color: white; margin-bottom: 24px; }
+.welcome-hero h2 { font-family: 'DM Serif Display', serif; font-size: 28px; margin-bottom: 8px; }
+.welcome-hero p { opacity: .85; font-size: 14px; }
+.stat-card { background: white; border-radius: 14px; border: 1px solid var(--border); padding: 18px; }
+.stat-num { font-family: 'DM Serif Display', serif; font-size: 32px; color: var(--teal); }
+.stat-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.scan-layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; }
+.drop-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px; text-align: center; cursor: pointer; transition: all .2s; background: var(--teal-light); }
+.drop-zone:hover, .drop-zone.drag { border-color: var(--teal); background: #d0ede6; }
+.drop-icon { font-size: 40px; margin-bottom: 12px; }
+.drop-text { font-size: 14px; font-weight: 600; color: var(--teal); margin-bottom: 4px; }
+.drop-hint { font-size: 12px; color: var(--muted); }
+.image-preview { max-width: 100%; border-radius: 10px; margin-bottom: 12px; max-height: 280px; object-fit: contain; }
+.btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.btn-teal { padding: 10px 20px; background: var(--teal); color: white; border: none; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; display: flex; align-items: center; gap: 6px; }
+.btn-teal:hover { background: #157a64; }
+.btn-teal:disabled { background: var(--muted); cursor: not-allowed; }
+.btn-outline { padding: 10px 20px; background: white; color: var(--text); border: 1.5px solid var(--border); border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; }
+.extracted-box { width: 100%; min-height: 140px; padding: 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 12px; font-family: 'DM Sans', sans-serif; resize: vertical; line-height: 1.6; }
+.info-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.info-label { font-size: 12px; color: var(--muted); min-width: 90px; }
+.info-val { font-size: 13px; font-weight: 500; }
+.med-item { background: var(--teal-light); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; }
+.med-name { font-weight: 600; font-size: 13px; color: var(--teal); margin-bottom: 4px; }
+.med-detail { font-size: 12px; color: var(--muted); }
+.badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-green { background: #d4f5e5; color: var(--green); }
+.badge-red { background: #fde8e8; color: var(--red); }
+.badge-amber { background: #fef3d4; color: var(--amber); }
+.loading-spin { display: inline-block; width: 18px; height: 18px; border: 2.5px solid rgba(255,255,255,.4); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.sched-item { display: flex; align-items: center; gap: 14px; padding: 14px; background: white; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 10px; }
+.sched-time { font-size: 13px; font-weight: 600; color: var(--teal); min-width: 60px; }
+.sched-med { flex: 1; }
+.sched-med-name { font-size: 14px; font-weight: 600; }
+.sched-med-dose { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.sched-actions { display: flex; gap: 6px; }
+.btn-taken { padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; font-family: inherit; background: var(--green); color: white; transition: opacity .15s; }
+.btn-taken:hover { opacity: .85; }
+.btn-not-taken { padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; font-family: inherit; background: var(--red); color: white; transition: opacity .15s; }
+.btn-not-taken:hover { opacity: .85; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-header { font-size: 11px; font-weight: 600; color: var(--muted); text-align: center; padding: 4px 0; }
+.cal-day { aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; border: 1.5px solid transparent; transition: all .15s; }
+.cal-day:hover { border-color: var(--teal); }
+.cal-day.today { background: var(--teal); color: white; font-weight: 700; }
+.cal-day.has-dose { background: var(--teal-light); }
+.cal-day.missed { background: #fde8e8; }
+.cal-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); margin-top: 2px; }
+.cal-dot.red { background: var(--red); }
+.family-alert { background: #fff8e6; border: 1px solid #f0d080; border-radius: 12px; padding: 14px 18px; display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.family-alert-text { font-size: 13px; font-weight: 500; }
+.notif-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 10px; margin-bottom: 8px; }
+.notif-item.unread { background: var(--teal-light); }
+.notif-icon { font-size: 18px; flex-shrink: 0; margin-top: 2px; }
+.notif-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.notif-body { font-size: 12px; color: var(--muted); }
+.notif-time { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 12px 20px; border-radius: 12px; font-size: 13px; font-weight: 500; z-index: 9999; animation: slideUp .3s ease; }
+.toast.success { background: var(--green); }
+.toast.error { background: var(--red); }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@media (max-width: 700px) { .scan-layout { grid-template-columns: 1fr; } .grid2 { grid-template-columns: 1fr; } }
+`;
+
+function Toast({ msg, type }) { return <div className={`toast ${type}`}>{msg}</div>; }
+
+function WelcomePage({ user, schedule }) {
+  const taken = schedule.filter(s => s.status === "taken").length;
+  const missed = schedule.filter(s => s.status === "missed").length;
+  const pending = schedule.filter(s => !s.status).length;
+  return (
+    <div className="page">
+      <div className="welcome-hero">
+        <h2>Welcome back, {user.name.split(" ")[0]} 👋</h2>
+        <p>Here's your medicine overview for today.</p>
+      </div>
+      <div className="grid3" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-num">{taken}</div><div className="stat-label">Taken today</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "#e89820" }}>{pending}</div><div className="stat-label">Pending today</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "#e05c5c" }}>{missed}</div><div className="stat-label">Missed today</div></div>
+      </div>
+      <div className="card">
+        <div className="card-title">Next upcoming dose</div>
+        {schedule.filter(s => !s.status).slice(0, 1).map(s => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ fontSize: 36 }}>💊</div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{s.name}</div>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 3 }}>{s.dosage} · {s.time}</div>
+            </div>
+          </div>
+        ))}
+        {schedule.filter(s => !s.status).length === 0 && <div style={{ fontSize: 13, color: "var(--muted)" }}>All doses accounted for today 🎉</div>}
+      </div>
+    </div>
+  );
+}
+
+function ScanPage({ onAddSchedule, showToast }) {
+  const [imageFile, setImageFile] = useState(null);
+  const [imageURL, setImageURL] = useState(null);
+  const [rawText, setRawText] = useState("");
+  const [parsedRx, setParsedRx] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef();
+
+  const handleFile = (file) => { if (!file) return; setImageFile(file); setImageURL(URL.createObjectURL(file)); setRawText(""); setParsedRx(null); };
+  const handleDrop = (e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
+
+  const runOCR = async () => {
+    if (!imageFile) return;
+    setLoading(true);
+    try {
+      const base64Full = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error("Failed to read image file"));
+        reader.readAsDataURL(imageFile);
+      });
+      const base64 = base64Full.split(",")[1];
+      const mediaType = imageFile.type || "image/jpeg";
+      const { rawText: t, parsed } = await extractPrescription(base64, mediaType);
+      setRawText(t); setParsedRx(parsed);
+      showToast("Prescription read successfully!", "success");
+    } catch (err) { showToast("Error: " + err.message, "error"); }
+    finally { setLoading(false); }
+  };
+
+  const addToSchedule = () => { if (!parsedRx?.medications?.length) return; onAddSchedule(parsedRx); showToast("Added to schedule!", "success"); };
+
+  return (
+    <div className="page">
+      <div className="page-title">Scan Prescription</div>
+      <div className="page-sub">Upload a prescription image to extract medicines using AI</div>
+      <div className="scan-layout">
+        <div>
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div className="card-title">Upload prescription</div>
+            <div className={`drop-zone${drag ? " drag" : ""}`}
+              onDragOver={e => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={handleDrop}
+              onClick={() => fileRef.current.click()}>
+              {imageURL ? <img src={imageURL} alt="prescription" className="image-preview" />
+                : <><div className="drop-icon">📋</div><div className="drop-text">Drop image here or choose file</div><div className="drop-hint">JPG, PNG — max 10MB</div></>}
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} />
+            </div>
+            <div className="btn-row">
+              <button className="btn-teal" onClick={runOCR} disabled={!imageFile || loading}>
+                {loading ? <><div className="loading-spin" /> Reading...</> : "📷 Read medicines"}
+              </button>
+              <button className="btn-outline" onClick={() => { setImageFile(null); setImageURL(null); setRawText(""); setParsedRx(null); }}>Clear</button>
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-title">Extracted text</div>
+            <textarea className="extracted-box" value={rawText} onChange={e => setRawText(e.target.value)} placeholder="Upload a prescription to extract text..." />
+            <div className="btn-row" style={{ marginTop: 10 }}>
+              <button className="btn-teal" disabled={!rawText || loading} onClick={async () => {
+                setLoading(true);
+                try { const parsed = await parseTextOnly(rawText); setParsedRx(parsed); showToast("Parsed successfully!", "success"); }
+                catch(e) { showToast("Parse error: " + e.message, "error"); }
+                finally { setLoading(false); }
+              }}>
+                {loading ? <><div className="loading-spin" /> Parsing...</> : "🔍 Parse & Preview"}
+              </button>
+              <button className="btn-outline" onClick={() => setRawText("")}>Clear</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div className="card-title">Patient information</div>
+            {parsedRx ? (
+              <>{[["Name", parsedRx.patient_name], ["Age", parsedRx.patient_age], ["Gender", parsedRx.patient_gender], ["Date", parsedRx.date], ["Doctor", parsedRx.doctor_name], ["Hospital", parsedRx.hospital_clinic], ["Diagnosis", parsedRx.diagnosis]].map(([l, v]) => v && (
+                <div key={l} className="info-row"><span className="info-label">{l}</span><span className="info-val">{v}</span></div>
+              ))}</>
+            ) : <div style={{ fontSize: 13, color: "var(--muted)" }}>Run OCR to see patient details</div>}
+          </div>
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div className="card-title" style={{ marginBottom: 0 }}>Medicines found</div>
+              <span className="badge badge-green">{parsedRx?.medications?.length || 0} medicines</span>
+            </div>
+            {parsedRx?.medications?.length
+              ? parsedRx.medications.map((m, i) => (
+                  <div key={i} className="med-item">
+                    <div className="med-name">💊 {m.name}</div>
+                    <div className="med-detail">{[m.dosage, m.frequency, m.duration].filter(Boolean).join(" · ")}</div>
+                    {m.instructions && <div className="med-detail" style={{ marginTop: 3, fontStyle: "italic" }}>{m.instructions}</div>}
+                  </div>
+                ))
+              : <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 14 }}>No medicines detected yet.</div>}
+            <button className="btn-teal" style={{ width: "100%", justifyContent: "center" }} onClick={addToSchedule} disabled={!parsedRx?.medications?.length}>
+              ➕ Add to schedule
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SchedulePage({ schedule, onUpdate, showToast, isFamily }) {
+  const todayKey = new Date().toDateString();
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const mark = (id, status) => {
+    const updated = schedule.map(s => s.id === id ? { ...s, status, markedAt: new Date().toISOString() } : s);
+    onUpdate(updated);
+    if (status === "taken") showToast("✅ Marked as taken!", "success");
+    else showToast("❌ Marked as not taken", "error");
+    if (status === "not-taken") sendNotif("⚠️ Medicine Missed", `${schedule.find(s => s.id === id)?.name} was not taken!`);
+  };
+
+  const clearAll = () => { onUpdate([]); setConfirmClear(false); showToast("Schedule cleared!", ""); };
+  const today = schedule.filter(s => s.date === todayKey);
+  const other = schedule.filter(s => s.date !== todayKey);
+
+  return (
+    <div className="page">
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4 }}>
+        <div className="page-title">{isFamily ? "Patient's Schedule" : "My Schedule"}</div>
+        {!isFamily && schedule.length > 0 && (
+          confirmClear
+            ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>Clear all?</span>
+                <button className="btn-not-taken" style={{ padding: "6px 14px" }} onClick={clearAll}>Yes, clear</button>
+                <button className="btn-outline" style={{ padding: "6px 14px" }} onClick={() => setConfirmClear(false)}>Cancel</button>
+              </div>
+            : <button className="btn-outline" style={{ padding: "8px 16px", color: "var(--red)", borderColor: "#fca5a5" }} onClick={() => setConfirmClear(true)}>🗑️ Clear Schedule</button>
+        )}
+      </div>
+      <div className="page-sub">Track taken and missed doses. Changes visible to the whole family.</div>
+      {today.length === 0 && <div className="card" style={{ color: "var(--muted)", fontSize: 14 }}>No medicines scheduled for today. Scan a prescription to add medicines.</div>}
+      {today.length > 0 && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-title">Today — {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</div>
+          {today.map(s => (
+            <div key={s.id} className="sched-item">
+              <div className="sched-time">{s.time}</div>
+              <div className="sched-med">
+                <div className="sched-med-name">💊 {s.name}</div>
+                <div className="sched-med-dose">{s.dosage} · {s.frequency}</div>
+              </div>
+              <div className="sched-actions">
+                {s.status === "taken" ? <span className="badge badge-green">✓ Taken</span>
+                  : s.status === "not-taken" ? <span className="badge badge-red">✗ Missed</span>
+                  : <><button className="btn-taken" onClick={() => mark(s.id, "taken")}>✓ Taken</button><button className="btn-not-taken" onClick={() => mark(s.id, "not-taken")}>✗ Not taken</button></>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {other.length > 0 && (
+        <div className="card">
+          <div className="card-title">Other days</div>
+          {other.slice(0, 10).map(s => (
+            <div key={s.id} className="sched-item" style={{ opacity: .7 }}>
+              <div className="sched-time">{s.time}</div>
+              <div className="sched-med">
+                <div className="sched-med-name">{s.name}</div>
+                <div className="sched-med-dose">{s.dosage} · {new Date(s.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div>
+              </div>
+              {s.status === "taken" ? <span className="badge badge-green">✓ Taken</span>
+                : s.status === "not-taken" ? <span className="badge badge-red">✗ Missed</span>
+                : <span className="badge" style={{ background: "#f0f4f3", color: "var(--muted)" }}>Upcoming</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarPage({ schedule }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth());
+  const [year, setYear] = useState(now.getFullYear());
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const dosesOnDay = (day) => { const d = new Date(year, month, day).toDateString(); return schedule.filter(s => s.date === d); };
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  return (
+    <div className="page">
+      <div className="page-title">Medicine Calendar</div>
+      <div className="page-sub">Visual overview of your prescription schedule</div>
+      <div className="card" style={{ maxWidth: 480 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <button className="btn-outline" style={{ padding: "6px 12px" }} onClick={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}>‹</button>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{months[month]} {year}</div>
+          <button className="btn-outline" style={{ padding: "6px 12px" }} onClick={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }}>›</button>
+        </div>
+        <div className="cal-grid">
+          {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d => <div key={d} className="cal-header">{d}</div>)}
+          {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1;
+            const doses = dosesOnDay(day);
+            const isToday = now.getDate() === day && now.getMonth() === month && now.getFullYear() === year;
+            const missed = doses.some(d => d.status === "not-taken");
+            return (
+              <div key={day} className={`cal-day${isToday ? " today" : doses.length ? " has-dose" : ""}${missed ? " missed" : ""}`} title={doses.map(d => d.name).join(", ")}>
+                {day}
+                {doses.length > 0 && <div className={`cal-dot${missed ? " red" : ""}`} />}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 16, marginTop: 16, fontSize: 12, color: "var(--muted)" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--teal-light)", display: "inline-block" }} /> Has doses</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#fde8e8", display: "inline-block" }} /> Missed</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--teal)", display: "inline-block" }} /> Today</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsPage({ schedule }) {
+  const notifs = [];
+  schedule.forEach(s => {
+    if (s.status === "not-taken") notifs.push({ icon: "⚠️", title: `Missed: ${s.name}`, body: `${s.dosage} was not taken.`, time: s.markedAt ? new Date(s.markedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Today", unread: true });
+    if (s.status === "taken") notifs.push({ icon: "✅", title: `Taken: ${s.name}`, body: `${s.dosage} was marked as taken.`, time: s.markedAt ? new Date(s.markedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Today", unread: false });
+  });
+  schedule.filter(s => !s.status).slice(0, 3).forEach(s => notifs.push({ icon: "🔔", title: `Upcoming: ${s.name}`, body: `Time to take ${s.dosage} — ${s.time}`, time: s.time, unread: true }));
+  return (
+    <div className="page">
+      <div className="page-title">Notifications</div>
+      <div className="page-sub">Medicine alerts and reminders</div>
+      <div className="card">
+        {notifs.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>No notifications yet.</div>}
+        {notifs.map((n, i) => (
+          <div key={i} className={`notif-item${n.unread ? " unread" : ""}`}>
+            <div className="notif-icon">{n.icon}</div>
+            <div><div className="notif-title">{n.title}</div><div className="notif-body">{n.body}</div><div className="notif-time">{n.time}</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FamilyDashboard({ user, schedule: initSchedule, onUpdate, showToast, onLogout }) {
+  const [activePage, setActivePage] = useState("overview");
+  const getPatientId = () => {
+    if (user._linkedPatientId) return user._linkedPatientId;
+    const users = store.get("users") || [];
+    const p = users.find(u => u.role === "patient" && u.name === user.caringFor);
+    return p ? p.id : null;
+  };
+  const [schedule, setSchedule] = useState(initSchedule);
+  const prevRef = useRef(JSON.stringify(initSchedule));
+  useEffect(() => {
+    const pid = getPatientId();
+    if (!pid) return;
+    const tick = setInterval(() => {
+      const fresh = store.get(`schedule_${pid}`) || [];
+      const freshStr = JSON.stringify(fresh);
+      if (freshStr !== prevRef.current) {
+        prevRef.current = freshStr;
+        setSchedule(fresh);
+        onUpdate(fresh);
+      }
+    }, 3000);
+    return () => clearInterval(tick);
+  }, [user]);
+
+  const todaySchedule = schedule.filter(s => s.date === new Date().toDateString());
+  const missed = todaySchedule.filter(s => s.status === "not-taken");
+  const taken = todaySchedule.filter(s => s.status === "taken");
+  const pending = todaySchedule.filter(s => !s.status);
+
+  const famNotifs = [...schedule].filter(s => s.status && s.markedAt).sort((a, b) => new Date(b.markedAt) - new Date(a.markedAt)).map(s => ({
+    icon: s.status === "taken" ? "✅" : "⚠️",
+    title: s.status === "taken" ? `Taken: ${s.name}` : `NOT Taken: ${s.name}`,
+    body: `${s.dosage || "As prescribed"} · Scheduled at ${s.time}`,
+    time: new Date(s.markedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+    unread: s.status === "not-taken", status: s.status,
+  }));
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      <div className="sidebar">
+        <div className="sidebar-logo"><div className="logo-badge">MR</div><div><div className="logo-text">Medicare</div><div className="logo-sub">Family View</div></div></div>
+        <nav className="sidebar-nav">
+          {[["overview","🏠","Overview"],["notifications","🔔",`Alerts${missed.length ? ` (${missed.length})` : ""}`],["schedule","📅","Schedule"],["calendar","🗓️","Calendar"]].map(([k,icon,label]) => (
+            <button key={k} className={`nav-item${activePage===k?" active":""}`} onClick={() => setActivePage(k)}>
+              <span className="nav-icon">{icon}</span>{label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-user">
+          <div className="user-avatar">{user.name.slice(0,2).toUpperCase()}</div>
+          <div><div className="user-name">{user.name}</div><div className="user-phone">{user.phone}</div></div>
+          <button className="logout-btn" onClick={onLogout}>Out</button>
+        </div>
+      </div>
+      <div className="main">
+        {activePage === "overview" && (
+          <div className="page">
+            <div className="page-title">Family Dashboard</div>
+            <div className="page-sub">Monitoring: <strong>{user.caringFor || "patient"}</strong> · Updates every 3 seconds</div>
+            {missed.length > 0 && (<div className="family-alert"><div style={{fontSize:22}}>⚠️</div><div><div className="family-alert-text" style={{ fontWeight: 700 }}>{missed.length} medicine(s) NOT taken today!</div><div style={{ fontSize: 12, marginTop: 4, color: "#a07010" }}>{missed.map(m => `${m.name} (${m.dosage || "As prescribed"}) · ${m.time}`).join(" | ")}</div></div></div>)}
+            <div className="grid3" style={{ marginBottom: 20 }}>
+              <div className="stat-card"><div className="stat-num">{taken.length}</div><div className="stat-label">Taken today</div></div>
+              <div className="stat-card"><div className="stat-num" style={{ color: "#e89820" }}>{pending.length}</div><div className="stat-label">Pending</div></div>
+              <div className="stat-card"><div className="stat-num" style={{ color: "#e05c5c" }}>{missed.length}</div><div className="stat-label">Missed</div></div>
+            </div>
+            <div className="card">
+              <div className="card-title">Today's medicine status</div>
+              {todaySchedule.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>No medicines scheduled today.</div>}
+              {todaySchedule.map(s => (
+                <div key={s.id} className="sched-item">
+                  <div className="sched-time">{s.time}</div>
+                  <div className="sched-med"><div className="sched-med-name">💊 {s.name}</div><div className="sched-med-dose">{s.dosage || "As prescribed"}</div>{s.markedAt && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>Marked at {new Date(s.markedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>}</div>
+                  <div>{s.status === "taken" ? <span className="badge badge-green">✓ Taken</span> : s.status === "not-taken" ? <span className="badge badge-red">✗ Not Taken</span> : <span className="badge" style={{ background: "#f0f4f3", color: "var(--muted)" }}>Pending</span>}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {activePage === "notifications" && (
+          <div className="page">
+            <div className="page-title">Medicine Alerts</div>
+            <div className="page-sub">All taken / not-taken updates from patient in real time</div>
+            <div className="card">
+              {famNotifs.length === 0 && <div style={{ color: "var(--muted)", fontSize: 13 }}>No updates yet.</div>}
+              {famNotifs.map((n, i) => (
+                <div key={i} className={`notif-item${n.unread ? " unread" : ""}`} style={{ borderLeft: `3px solid ${n.status === "taken" ? "var(--green)" : "var(--red)"}`, marginBottom: 10, borderRadius: 10 }}>
+                  <div className="notif-icon">{n.icon}</div>
+                  <div style={{ flex: 1 }}><div className="notif-title">{n.title}</div><div className="notif-body">{n.body}</div><div className="notif-time">🕐 {n.time}</div></div>
+                  <span className={`badge ${n.status === "taken" ? "badge-green" : "badge-red"}`}>{n.status === "taken" ? "✓ Taken" : "✗ Missed"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {activePage === "schedule" && <SchedulePage schedule={schedule} onUpdate={onUpdate} showToast={showToast} isFamily={true} />}
+        {activePage === "calendar" && <CalendarPage schedule={schedule} />}
+      </div>
+    </div>
+  );
+}
+
+function PatientApp({ user, onLogout }) {
+  const [activePage, setActivePage] = useState("welcome");
+  const [schedule, setSchedule] = useState(() => store.get(`schedule_${user.id}`) || []);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => { store.set(`schedule_${user.id}`, schedule); }, [schedule, user.id]);
+
+  const showToast = useCallback((msg, type = "") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
+
+  const addToSchedule = (rx) => {
+    const todayKey = new Date().toDateString();
+    const times = ["08:00 AM", "02:00 PM", "08:00 PM", "10:00 PM"];
+    const newItems = rx.medications.map((m, i) => ({
+      id: `${Date.now()}_${i}`, name: m.name, dosage: m.dosage || "As prescribed",
+      frequency: m.frequency || "Daily", duration: m.duration, instructions: m.instructions,
+      time: times[i % times.length], date: todayKey, status: null, markedAt: null,
+      patientName: rx.patient_name, doctorName: rx.doctor_name,
+    }));
+    setSchedule(prev => [...prev, ...newItems]);
+  };
+
+  useEffect(() => {
+    requestNotifPerm();
+    const interval = setInterval(() => {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+      const todayKey = now.toDateString();
+      schedule.forEach(s => {
+        if (s.date === todayKey && !s.status && s.time === timeStr) {
+          sendNotif("💊 Medicine Reminder", `Time to take ${s.name} — ${s.dosage}`);
+          showToast(`🔔 Time to take ${s.name}!`, "");
+        }
+      });
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [schedule, showToast]);
+
+  return (
+    <div className="app">
+      <div className="sidebar">
+        <div className="sidebar-logo"><div className="logo-badge">MR</div><div><div className="logo-text">Medicare</div><div className="logo-sub">Reminder</div></div></div>
+        <nav className="sidebar-nav">
+          {[["welcome","🏠","Welcome"],["scan","📷","Scan"],["schedule","📅","Schedule"],["calendar","🗓️","Calendar"],["notifications","🔔","Notifications"]].map(([k,icon,label]) => (
+            <button key={k} className={`nav-item${activePage===k?" active":""}`} onClick={() => setActivePage(k)}>
+              <span className="nav-icon">{icon}</span>{label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-user">
+          <div className="user-avatar">{user.name.slice(0,2).toUpperCase()}</div>
+          <div><div className="user-name">{user.name}</div><div className="user-phone">{user.phone}</div></div>
+          <button className="logout-btn" onClick={onLogout}>Out</button>
+        </div>
+      </div>
+      <div className="main">
+        {activePage === "welcome" && <WelcomePage user={user} schedule={schedule} />}
+        {activePage === "scan" && <ScanPage onAddSchedule={addToSchedule} showToast={showToast} />}
+        {activePage === "schedule" && <SchedulePage schedule={schedule} onUpdate={setSchedule} showToast={showToast} isFamily={false} />}
+        {activePage === "calendar" && <CalendarPage schedule={schedule} />}
+        {activePage === "notifications" && <NotificationsPage schedule={schedule} />}
+      </div>
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+    </div>
+  );
+}
+
+function App() {
+  const user = store.get("currentUser");
+  const [toast, setToast] = useState(null);
+  const showToast = useCallback((msg, type = "") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
+
+  // If not logged in, redirect to login page
+  useEffect(() => { if (!user) window.location.href = "login.html"; }, []);
+
+  const handleLogout = () => { store.set("currentUser", null); window.location.href = "login.html"; };
+
+  const getPatientId = () => {
+    if (!user) return null;
+    if (user.role === "patient") return user.id;
+    if (user._linkedPatientId) return user._linkedPatientId;
+    const users = store.get("users") || [];
+    const patient = users.find(u2 => u2.role === "patient" && u2.name === user.caringFor);
+    return patient ? patient.id : null;
+  };
+
+  const [schedule, setSchedule] = useState(() => {
+    if (!user) return [];
+    const pid = user.role === "patient" ? user.id : (() => { const users = store.get("users") || []; const p = users.find(u2 => u2.role === "patient" && u2.name === user?.caringFor); return p ? p.id : null; })();
+    return pid ? (store.get(`schedule_${pid}`) || []) : [];
+  });
+
+  if (!user) return <div style={{ padding: 40, fontFamily: "sans-serif" }}>Redirecting to login...</div>;
+
+  return (
+    <>
+      <style>{CSS}</style>
+      {user.role === "family"
+        ? <FamilyDashboard user={user} schedule={schedule} onUpdate={(s) => { setSchedule(s); const pid = getPatientId(); if (pid) store.set(`schedule_${pid}`, s); }} showToast={showToast} onLogout={handleLogout} />
+        : <PatientApp user={user} onLogout={handleLogout} />}
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+    </>
+  );
+}
+
+const domRoot = ReactDOM.createRoot(document.getElementById("root"));
+domRoot.render(<App />);
+  </script>
+</body>
+</html>

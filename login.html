@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medicare Reminder – Login</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body style="margin:0">
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState } = React;
+
+const store = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --teal: #1a8a72; --teal-light: #e8f5f1; --teal-mid: #2fb89a;
+  --bg: #f4f7f5; --white: #ffffff; --text: #1c2b26; --muted: #7a9990;
+  --border: #d6e8e2; --red: #e05c5c; --green: #2aab6e;
+}
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #d4ede7 0%, #b8dfd6 100%); padding: 20px; }
+.login-card { background: white; border-radius: 24px; padding: 40px; max-width: 900px; width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; box-shadow: 0 20px 60px rgba(26,138,114,0.15); }
+.login-left h1 { font-family: 'DM Serif Display', serif; font-size: 32px; line-height: 1.2; margin-bottom: 12px; }
+.login-left p { font-size: 14px; color: var(--muted); line-height: 1.6; margin-bottom: 24px; }
+.login-quote { border-left: 3px solid var(--teal); padding: 10px 14px; font-style: italic; font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+.login-quote strong { display: block; color: var(--teal); font-style: normal; margin-top: 6px; font-size: 12px; }
+.feature-list { display: flex; flex-direction: column; gap: 10px; }
+.feature-item { background: var(--teal-light); border-radius: 10px; padding: 12px 14px; }
+.feature-item h4 { font-size: 13px; font-weight: 600; color: var(--teal); margin-bottom: 3px; }
+.feature-item p { font-size: 12px; color: var(--muted); }
+.login-right { display: flex; flex-direction: column; }
+.brand-row { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.logo-badge { width: 36px; height: 36px; background: var(--teal); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 13px; }
+.logo-text { font-weight: 600; font-size: 14px; }
+.logo-sub { font-size: 11px; color: var(--muted); }
+.tabs { display: flex; background: var(--bg); border-radius: 10px; padding: 3px; margin-bottom: 20px; }
+.tab { flex: 1; padding: 7px; text-align: center; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; border: none; background: none; transition: all .15s; }
+.tab.active { background: white; color: var(--teal); font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.form-label { font-size: 12px; font-weight: 600; margin-bottom: 5px; display: block; }
+.form-group { margin-bottom: 14px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-input { width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 13px; font-family: inherit; transition: border-color .15s; outline: none; }
+.form-input:focus { border-color: var(--teal); }
+.form-select { width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 13px; font-family: inherit; background: white; cursor: pointer; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.btn-primary { width: 100%; padding: 12px; background: var(--teal); color: white; border: none; border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
+.btn-primary:hover { background: #157a64; }
+.form-hint { font-size: 11px; color: var(--muted); text-align: center; margin-top: 10px; }
+.err-box { background: #fde8e8; color: #c03030; border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 12px; white-space: pre-line; }
+@media (max-width: 700px) { .login-card { grid-template-columns: 1fr; } .login-left { display: none; } }
+`;
+
+function LoginPage() {
+  const [tab, setTab] = useState("login");
+  const [role, setRole] = useState("patient");
+  const [form, setForm] = useState({ name: "", age: "", caringFor: "", phone: "", altPhone: "", password: "", sms: true });
+  const [loginForm, setLoginForm] = useState({ phone: "", password: "", role: "patient" });
+  const [err, setErr] = useState("");
+
+  const handleRegister = () => {
+    if (!form.name || !form.phone || !form.password) { setErr("Please fill name, phone and password"); return; }
+    const users = store.get("users") || [];
+    if (users.find(u => u.phone === form.phone)) { setErr("Phone already registered"); return; }
+    const user = { ...form, role, id: Date.now().toString() };
+    store.set("users", [...users, user]);
+    store.set("currentUser", user);
+    window.location.href = "dashboard.html";
+  };
+
+  const handleLogin = () => {
+    if (!loginForm.phone || !loginForm.password) { setErr("Enter phone and password"); return; }
+    const users = store.get("users") || [];
+    let user = users.find(u => u.phone === loginForm.phone && u.password === loginForm.password && u.role === loginForm.role);
+    if (!user && loginForm.role === "family") {
+      const patient = users.find(u => u.role === "patient" && u.altPhone === loginForm.phone);
+      if (patient) {
+        user = users.find(u => u.role === "family" && u.caringFor === patient.name && u.password === loginForm.password);
+        if (!user) {
+          user = { id: `fam_${patient.id}`, name: `Family of ${patient.name}`, phone: loginForm.phone, role: "family", caringFor: patient.name, _linkedPatientId: patient.id };
+        }
+      }
+    }
+    if (!user) { setErr("Invalid credentials or role.\nFamily members: use patient's alternate phone number."); return; }
+    store.set("currentUser", user);
+    window.location.href = "dashboard.html";
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <div className="login-left">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+            <span style={{ background: "#1a8a72", color: "white", borderRadius: 8, padding: "4px 8px", fontSize: 12, fontWeight: 700 }}>💊 medicare reminder</span>
+          </div>
+          <h1>Log in & choreograph every dose with calm precision.</h1>
+          <p>Keep patients and their circle in sync with AI prescription scans, automatic schedules, alarms, and five-minute safety nudges.</p>
+          <div className="login-quote">
+            "The greatest medicine of all is to teach people how not to need it."
+            <strong>— Hippocrates</strong>
+          </div>
+          <div className="feature-list">
+            <div className="feature-item"><h4>AI Prescription Vision</h4><p>Extract medicines using Claude Vision, then auto-schedule every dose.</p></div>
+            <div className="feature-item"><h4>Smart Alerts & Escalation</h4><p>5-minute follow-ups, alarm beeps, and automatic SMS to alternate caregivers.</p></div>
+            <div className="feature-item"><h4>Family-first Dashboard</h4><p>Everyone sees what's taken, what's missed, and what's next.</p></div>
+          </div>
+        </div>
+        <div className="login-right">
+          <div className="brand-row">
+            <div className="logo-badge">MR</div>
+            <div><div className="logo-text">Medicare Reminder</div><div className="logo-sub">Family comfort dashboard</div></div>
+          </div>
+          <div className="tabs">
+            <button className={`tab${tab === "login" ? " active" : ""}`} onClick={() => { setTab("login"); setErr(""); }}>Login</button>
+            <button className={`tab${tab === "register" ? " active" : ""}`} onClick={() => { setTab("register"); setErr(""); }}>Register</button>
+          </div>
+          {err && <div className="err-box">{err}</div>}
+          {tab === "register" ? (
+            <>
+              <div className="form-group"><label className="form-label">I am logging in as</label>
+                <select className="form-select" value={role} onChange={e => setRole(e.target.value)}>
+                  <option value="patient">Patient</option>
+                  <option value="family">Family member</option>
+                </select>
+              </div>
+              <div className="form-group"><label className="form-label">Full name</label>
+                <input className="form-input" placeholder="Full name" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div className="form-row">
+                <div className="form-group"><label className="form-label">Age</label>
+                  <input className="form-input" placeholder="Age" value={form.age} onChange={e => setForm(p => ({ ...p, age: e.target.value }))} />
+                </div>
+                <div className="form-group"><label className="form-label">Caring for</label>
+                  <input className="form-input" placeholder="Patient name / self" value={form.caringFor} onChange={e => setForm(p => ({ ...p, caringFor: e.target.value }))} />
+                </div>
+              </div>
+              <div className="form-group"><label className="form-label">Primary phone</label>
+                <input className="form-input" placeholder="Primary phone" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} />
+              </div>
+              <div className="form-group"><label className="form-label">Alternate contact</label>
+                <input className="form-input" placeholder="Alternate number" value={form.altPhone} onChange={e => setForm(p => ({ ...p, altPhone: e.target.value }))} />
+              </div>
+              <div className="form-group"><label className="form-label">Password</label>
+                <input className="form-input" type="password" placeholder="Create password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} />
+              </div>
+              <div className="checkbox-row">
+                <input type="checkbox" checked={form.sms} onChange={e => setForm(p => ({ ...p, sms: e.target.checked }))} />
+                Send 5-minute safety SMS to alternate number
+              </div>
+              <button className="btn-primary" onClick={handleRegister}>Save profile & open dashboard →</button>
+              <div className="form-hint">By continuing you agree to gentle reminder notifications.</div>
+            </>
+          ) : (
+            <>
+              <div className="form-group"><label className="form-label">Login as</label>
+                <select className="form-select" value={loginForm.role} onChange={e => setLoginForm(p => ({ ...p, role: e.target.value }))}>
+                  <option value="patient">Patient</option>
+                  <option value="family">Family member</option>
+                </select>
+              </div>
+              <div className="form-group"><label className="form-label">Phone number</label>
+                <input className="form-input" placeholder="Phone number" value={loginForm.phone} onChange={e => setLoginForm(p => ({ ...p, phone: e.target.value }))} />
+              </div>
+              <div className="form-group"><label className="form-label">Password</label>
+                <input className="form-input" type="password" placeholder="Password" value={loginForm.password} onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))} />
+              </div>
+              <button className="btn-primary" onClick={handleLogin}>Login →</button>
+              <div className="form-hint" style={{ marginTop: 14 }}>
+                Don't have an account? <span style={{ color: "#1a8a72", cursor: "pointer", fontWeight: 600 }} onClick={() => setTab("register")}>Register here</span>
+              </div>
+              {loginForm.role === "family" && (
+                <div style={{ marginTop: 10, background: "#e8f5f1", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#1a8a72" }}>
+                  💡 Family members: use the <strong>alternate phone number</strong> that the patient gave during registration.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const domRoot = ReactDOM.createRoot(document.getElementById("root"));
+domRoot.render(<><style>{CSS}</style><LoginPage /></>);
+  </script>
+</body>
+</html>

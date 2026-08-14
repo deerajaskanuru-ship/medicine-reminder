@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medicare Reminder</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: linear-gradient(135deg, #c8e8e4 0%, #a8d8d2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 28px;
+      max-width: 880px;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
+      box-shadow: 0 8px 48px rgba(26,92,90,0.12);
+    }
+    .left {
+      padding: 52px 48px 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      color: #2a8c89;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+    .headline {
+      font-family: 'DM Serif Display', serif;
+      font-size: 38px;
+      line-height: 1.18;
+      color: #0d3534;
+      margin-bottom: 16px;
+    }
+    .subtext {
+      font-size: 14px;
+      font-weight: 500;
+      color: #2a5c5a;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+    .quote-block {
+      border-left: 3px solid #2a8c89;
+      padding: 10px 16px;
+      margin-bottom: 36px;
+    }
+    .quote-text {
+      font-style: italic;
+      font-size: 13.5px;
+      color: #2a5c5a;
+      line-height: 1.6;
+    }
+    .quote-author {
+      font-size: 12px;
+      color: #2a8c89;
+      margin-top: 6px;
+      font-weight: 500;
+    }
+    .btn-start {
+      display: inline-block;
+      background: #1a5c5a;
+      color: #ffffff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      padding: 14px 32px;
+      border-radius: 50px;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.18s;
+      width: fit-content;
+    }
+    .btn-start:hover { background: #0f4240; }
+    .footer-text {
+      font-size: 11px;
+      color: #7aacaa;
+      margin-top: 36px;
+    }
+    .right {
+      background: #f0faf9;
+      padding: 52px 40px 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .right-title {
+      font-family: 'DM Serif Display', serif;
+      font-size: 22px;
+      color: #0d3534;
+      margin-bottom: 24px;
+    }
+    .feature-list { display: flex; flex-direction: column; gap: 12px; }
+    .feature-item {
+      background: #c8eeea;
+      border-radius: 12px;
+      padding: 14px 18px;
+      font-size: 13.5px;
+      color: #1a5c5a;
+      font-weight: 500;
+    }
+    @media (max-width: 640px) {
+      .card { grid-template-columns: 1fr; }
+      .right { display: none; }
+      .headline { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="left">
+      <div>
+        <div class="label">Medicine Reminder</div>
+        <h1 class="headline">Your daily dose of<br>care, powered by AI</h1>
+        <p class="subtext">Smart schedules, voice prompts, and family alerts<br>in one gentle experience.</p>
+        <div class="quote-block">
+          <div class="quote-text">"Take care of your body. It's the only place you have to live."</div>
+          <div class="quote-author">— Jim Rohn</div>
+        </div>
+        <a href="login.html" class="btn-start">Get Started</a>
+      </div>
+      <div class="footer-text">© 2025 Medicare Reminder · Designed for families who care.</div>
+    </div>
+    <div class="right">
+      <div class="right-title">Calm + Consistent</div>
+      <div class="feature-list">
+        <div class="feature-item">• AI prescription scanner (Claude Vision)</div>
+        <div class="feature-item">• Auto-scheduling &amp; talking reminders</div>
+        <div class="feature-item">• 5-minute safety check with family SMS</div>
+        <div class="feature-item">• Works for patients or caregivers</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
