@@ -12,7 +12,15 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.static(__dirname));
 
 function getApiKey() {
-  try { return require('./config.json').apiKey; } catch (e) { return null; }
+  if (process.env.ANTHROPIC_API_KEY) {
+    return process.env.ANTHROPIC_API_KEY;
+  }
+
+  try {
+    return require('./config.json').apiKey;
+  } catch (e) {
+    return null;
+  }
 }
 
 // Helper: call Anthropic API from Node (no CORS issue)
